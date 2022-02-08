@@ -1,0 +1,7 @@
+mkdir -p results/bam
+for file in results/bam/*_sorted.bam
+do 
+    SRR=$(basename $file _sorted.sam)
+    echo $SRR
+    samtools index ${SRR}_sorted.sam
+done
