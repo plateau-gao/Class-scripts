@@ -1,0 +1,2 @@
+# Class-scripts
+-📖 Courses assignment
