@@ -1,2 +1,2 @@
 # Class-scripts
--📖 Courses assignment
+-📖 to store scripts of courses or assignment
