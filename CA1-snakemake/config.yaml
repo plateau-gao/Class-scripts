@@ -1,0 +1,10 @@
+SRR:
+ - SRR2584866
+ - SRR2584863
+ - SRR2589044
+GENOME:
+ - Ec606
+THREADS:
+ - 4
+ADAPTERS:
+ - /usr/local/Caskroom/miniconda/base/envs/snake/share/trimmomatic-0.39-2/adapters/NexteraPE-PE.fa

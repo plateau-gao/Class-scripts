@@ -1,0 +1,135 @@
+import os
+
+configfile: "config.yaml"
+
+READ = [1,2]
+
+SRR = config["SRR"]
+
+# target file can be specified by command line: snakemake -np SRR12345678.sam
+# snakemake also accept the rule name as target
+# if no target is given at the command line, Snakemake will define the first rule of the Snakefile as the target. (rule all)
+rule all:
+    input:
+        expand("results/vcf/{srr}_final_variants.vcf", srr=SRR),
+        "results/fastqc"
+
+# use directory as the output
+# the directory function cannot make directory implicitly
+# """ We could use multiple shell lines in three double quotation marks """
+rule fastqc:
+    input:
+        expand("data/fastq/{srr}_{read}.fastq.gz",srr=SRR,read=READ)
+    output:
+        directory("results/fastqc")
+    shell:
+        """
+        mkdir -p {output}
+        fastqc {input} -o {output}
+        """
+
+# how to use parameters comes from config file: config["Params' name"]
+# how to cite elements in the input or output: 1. input.name; 2. input[number]. Attention: The index of elements start from 0
+# if we use file as the output, the directory storing the target file will be made implicitly
+# I used conda to install the trimmomatic. If you install trimmomatic by apt or other ways, you may need to change the command "trimmomatic PE" in the shell part
+rule trim_adapter:
+    input:
+        one="data/fastq/{srr}_1.fastq.gz",
+        two="data/fastq/{srr}_2.fastq.gz",
+        adapters=config["ADAPTERS"]
+    output:
+        "results/trimmed/{srr}_1.trim.fastq.gz",
+        "results/orphaned/{srr}_1.untrim.fastq.gz",
+        "results/trimmed/{srr}_2.trim.fastq.gz",
+        "results/orphaned/{srr}_2.untrim.fastq.gz"
+    shell:
+        """
+        trimmomatic PE {input.one} {input.two} {output[0]} {output[1]} {output[2]} {output[3]} \
+        SLIDINGWINDOW:4:20 MINLEN:25 ILLUMINACLIP:{input.adapters}:2:40:15
+        """
+
+rule bowtie2_build:
+    params:
+        genome=config["GENOME"]
+    input:
+        "data/genome/ecoli_rel606.fasta"
+    output:
+        directory("data/indexes")
+    shell:
+        """
+        mkdir -p {output}
+        bowtie2-build {input} data/indexes/{params.genome}
+        """
+
+# we can specify the threads using "threads", and this parameters could be influenced by the command line flag: --cores INT. 
+# by default, threads is one
+rule bowtie2_align:
+    params:
+        genome=config["GENOME"]
+    input:
+        one="results/trimmed/{srr}_1.trim.fastq.gz",
+        two="results/trimmed/{srr}_2.trim.fastq.gz",
+        index="data/indexes/"
+    threads:int(config["THREADS"][0])
+    output:
+        "results/sam/{srr}.sam"
+    shell:
+        """
+        bowtie2 -x {input.index}/{params.genome} --very-fast -p {threads} -1 {input.one} -2 {input.two} -S {output}
+        """
+
+rule sam2bam:
+    input:
+        sam="results/sam/{srr}.sam"
+    output:
+        "results/bam/{srr}.bam"
+    shell:
+        """
+        samtools view -S -b {input.sam} > {output}
+        """
+
+rule sort_bam:
+    input:
+        bam="results/bam/{srr}.bam"
+    output:
+        "results/bam/{srr}_sorted.bam"
+    shell:
+        "samtools sort {input.bam} -o {output}"
+
+rule index_bam:
+    input:
+        sort_bam="results/bam/{srr}_sorted.bam"
+    output:
+        "results/bam/{srr}_sorted.bam.bai"
+    shell:
+        "samtools index {input.sort_bam}"
+
+rule raw_bcf:
+    input:
+        sort_bam="results/bam/{srr}_sorted.bam",
+        index_bam="results/bam/{srr}_sorted.bam.bai",
+        genome="data/genome/ecoli_rel606.fasta"
+    output:
+        "results/bcf/{srr}_raw.bcf"
+    shell:
+        """
+        bcftools mpileup -O b -o {output} -f {input.genome} {input.sort_bam}
+        """
+
+rule detect_SNP:
+    input:
+        raw_bcf="results/bcf/{srr}_raw.bcf"
+    output:
+        "results/bcf/{srr}_variants.vcf"
+    shell:
+        "bcftools call --ploidy 1 -m -v -o {output} {input.raw_bcf}"
+
+rule filter_report_SNP:
+    input:
+        vcf="results/bcf/{srr}_variants.vcf"
+    output:
+        "results/vcf/{srr}_final_variants.vcf"
+    shell:
+        """
+        vcfutils.pl varFilter {input.vcf} > {output}
+        """
